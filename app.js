@@ -96,11 +96,14 @@ async function afterLogin(){
 async function loadEntries(){
   const { data, error } = await supabase
     .from('weight_entries')
-    .select('entry_date, weight, change_percent')
+    .select('entry_date, weight, change_percent, change_from_baseline_percent')
     .eq('user_id', SESSION.user.id)
     .order('entry_date', { ascending: true });
   ENTRIES = error ? [] : data.map(r => ({
-    date: r.entry_date, weight: Number(r.weight), changePercent: r.change_percent === null ? null : Number(r.change_percent)
+    date: r.entry_date,
+    weight: Number(r.weight),
+    changePercent: r.change_percent === null ? null : Number(r.change_percent),
+    baselinePercent: r.change_from_baseline_percent === null ? null : Number(r.change_from_baseline_percent)
   }));
 }
 
@@ -309,7 +312,10 @@ function renderLogPanel(){
       row.innerHTML = `
         <div class="entry-date">${fmtDate(e.date)}</div>
         <div class="entry-weight">${e.weight} kg</div>
-        <div class="entry-change ${changeClass(e.changePercent)}">${changeLabel(e.changePercent)}</div>
+        <div class="entry-changes">
+          <div class="entry-change ${changeClass(e.changePercent)}">${changeLabel(e.changePercent)}</div>
+          <div class="entry-baseline">较起始 ${changeLabel(e.baselinePercent)}</div>
+        </div>
         <button class="entry-del" data-date="${e.date}">删除</button>
       `;
       list.appendChild(row);
@@ -324,15 +330,16 @@ function renderLogPanel(){
 
 function recomputeChanges(sortedAsc){
   const out = [];
+  const baselineWeight = sortedAsc.length ? sortedAsc[0].weight : null;
   for(let i=0;i<sortedAsc.length;i++){
     const cur = sortedAsc[i];
-    if(i===0){
-      out.push({ date: cur.date, weight: cur.weight, changePercent: null });
-    } else {
+    let changePercent = null;
+    if(i > 0){
       const prev = sortedAsc[i-1];
-      const pct = ((cur.weight - prev.weight) / prev.weight) * 100;
-      out.push({ date: cur.date, weight: cur.weight, changePercent: Math.round(pct*100)/100 });
+      changePercent = Math.round(((cur.weight - prev.weight) / prev.weight) * 10000) / 100;
     }
+    const baselinePercent = Math.round(((cur.weight - baselineWeight) / baselineWeight) * 10000) / 100;
+    out.push({ date: cur.date, weight: cur.weight, changePercent, baselinePercent });
   }
   return out;
 }
@@ -358,7 +365,8 @@ async function submitEntry(){
     user_id: SESSION.user.id,
     entry_date: e.date,
     weight: e.weight,
-    change_percent: e.changePercent
+    change_percent: e.changePercent,
+    change_from_baseline_percent: e.baselinePercent
   }));
   const { error } = await supabase.from('weight_entries').upsert(rows, { onConflict: 'user_id,entry_date' });
   if(error){
@@ -387,7 +395,8 @@ async function deleteEntry(date){
       user_id: SESSION.user.id,
       entry_date: e.date,
       weight: e.weight,
-      change_percent: e.changePercent
+      change_percent: e.changePercent,
+      change_from_baseline_percent: e.baselinePercent
     }));
     const { error } = await supabase.from('weight_entries').upsert(rows, { onConflict: 'user_id,entry_date' });
     if(error){ showToast('重新计算失败，请刷新重试'); return; }
@@ -451,7 +460,7 @@ async function renderWallPanel(){
 
   const { data, error } = await supabase
     .from('team_wall')
-    .select('user_id, name, avatar, entry_date, change_percent')
+    .select('user_id, name, avatar, entry_date, change_percent, change_from_baseline_percent')
     .order('entry_date', { ascending: false });
 
   if(error){
@@ -464,12 +473,12 @@ async function renderWallPanel(){
     if(!latestByUser.has(row.user_id)) latestByUser.set(row.user_id, row);
   }
   const rows = [...latestByUser.values()].sort((a,b)=> b.entry_date.localeCompare(a.entry_date));
-  const totalDown = rows.filter(r => Number(r.change_percent) < 0).length;
+  const totalDown = rows.filter(r => Number(r.change_from_baseline_percent) < 0).length;
 
   panel.innerHTML = `
     <div class="wall-head">
       <div class="big-stat">${totalDown}</div>
-      <div class="big-stat-label">位队友最新一次记录比上次更轻</div>
+      <div class="big-stat-label">位队友已经比自己的起始体重更轻</div>
     </div>
     <div class="privacy-note">👀 团队墙只显示增减百分比，不会显示任何人的具体体重。</div>
     <div id="wall-list"></div>
@@ -480,16 +489,20 @@ async function renderWallPanel(){
     return;
   }
   rows.forEach(m=>{
-    const pct = Number(m.change_percent);
+    const baselinePct = Number(m.change_from_baseline_percent);
+    const latestPct = m.change_percent === null ? null : Number(m.change_percent);
     const row = document.createElement('div');
     row.className = 'wall-row';
     row.innerHTML = `
       <div class="wall-av">${m.avatar}</div>
       <div class="wall-info">
         <div class="wall-name">${escapeHtml(m.name)}</div>
-        <div class="wall-date">${fmtDate(m.entry_date)}</div>
+        <div class="wall-date">${fmtDate(m.entry_date)} 更新</div>
       </div>
-      <div class="wall-change ${changeClass(pct)}">${changeLabel(pct)}</div>
+      <div class="wall-changes">
+        <div class="wall-change ${changeClass(baselinePct)}">${changeLabel(baselinePct)}</div>
+        <div class="wall-change-sub">较起始体重${latestPct===null ? '' : ` · 最新 ${changeLabel(latestPct)}`}</div>
+      </div>
     `;
     list.appendChild(row);
   });
