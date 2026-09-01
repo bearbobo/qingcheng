@@ -9,6 +9,7 @@
   --line:#D8D3C8;
   --card:#FFFFFF;
   --error:#C0392B;
+  --rose-gold:#B8697A;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
@@ -227,6 +228,12 @@ input:focus{
   font-size:19px;
 }
 .whoami .name{font-weight:600;font-size:15px;}
+.streak-line{
+  font-size:12px;
+  font-weight:600;
+  color:var(--coral);
+  margin-top:2px;
+}
 .whoami .edit-link{
   margin-left:auto;
   font-size:13px;
@@ -310,6 +317,40 @@ input:focus{
 }
 .wall-head .big-stat-label{ font-size:13px; color:var(--ink-soft); }
 
+.weekly-star-card{
+  background:linear-gradient(135deg, rgba(184,105,122,0.10), rgba(184,105,122,0.03));
+  border:1px solid rgba(184,105,122,0.35);
+  border-radius:14px;
+  padding:16px 18px;
+  margin-bottom:22px;
+}
+.weekly-star-label{
+  font-size:12.5px;
+  font-weight:700;
+  color:var(--rose-gold);
+  letter-spacing:0.02em;
+  margin-bottom:10px;
+}
+.weekly-star-body{
+  display:flex;
+  align-items:center;
+  gap:14px;
+}
+.weekly-star-av{
+  width:44px; height:44px; font-size:21px;
+  box-shadow:0 0 0 2px var(--rose-gold);
+}
+.weekly-star-info{ flex:1; min-width:0; }
+.weekly-star-name{ font-weight:700; font-size:15.5px; }
+.weekly-star-sub{ font-size:12.5px; color:var(--ink-soft); }
+.weekly-star-pct{
+  font-family:'Fraunces',serif;
+  font-size:24px;
+  font-weight:600;
+  color:var(--rose-gold);
+  font-variant-numeric:tabular-nums;
+}
+
 .wall-row{
   display:flex;
   align-items:center;
@@ -341,6 +382,32 @@ input:focus{
   color:var(--ink-soft);
   font-variant-numeric:tabular-nums;
   white-space:nowrap;
+}
+
+.wall-row-champion{
+  background:linear-gradient(to right, rgba(184,105,122,0.06), transparent);
+  border-radius:10px;
+  margin:0 -8px;
+  padding-left:8px;
+  padding-right:8px;
+}
+.wall-row-champion .wall-av{
+  width:52px;
+  height:52px;
+  font-size:25px;
+  box-shadow:0 0 0 2px var(--rose-gold);
+}
+.wall-row-champion .wall-name{
+  color:var(--rose-gold);
+}
+.wall-row-champion .wall-change{
+  color:var(--rose-gold) !important;
+}
+.champion-badge{
+  font-size:11.5px;
+  font-weight:600;
+  color:var(--rose-gold);
+  margin-left:4px;
 }
 
 .loading{ color:var(--ink-soft); font-size:14px; padding:20px 4px; }
