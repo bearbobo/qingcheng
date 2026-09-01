@@ -39,6 +39,39 @@ function escapeHtml(s){
   return d.innerHTML;
 }
 
+function daysBetween(dateA, dateB){
+  const a = new Date(dateA + 'T00:00:00');
+  const b = new Date(dateB + 'T00:00:00');
+  return Math.round((b - a) / 86400000);
+}
+
+// current consecutive-day streak ending at the last date in a chronologically
+// sorted (ascending) list of date strings. "active" means the streak still
+// reaches into today or yesterday, rather than having gone cold.
+function computeStreak(datesAsc){
+  if(datesAsc.length === 0) return { count: 0, active: false };
+  let count = 1;
+  for(let i = datesAsc.length - 1; i > 0; i--){
+    if(daysBetween(datesAsc[i-1], datesAsc[i]) === 1){
+      count++;
+    } else {
+      break;
+    }
+  }
+  const active = daysBetween(datesAsc[datesAsc.length - 1], todayStr()) <= 1;
+  return { count, active };
+}
+
+// Derives the % weight change between two points in time using only their
+// change_from_baseline_percent values (both relative to the same baseline
+// weight) — the actual weight cancels out of the math, so this never needs
+// to touch a real weight number.
+function pctBetweenBaselinePoints(baselinePctAtRef, baselinePctAtLatest){
+  const denom = 1 + (baselinePctAtRef / 100);
+  if(denom <= 0) return null;
+  return Math.round(((baselinePctAtLatest - baselinePctAtRef) / denom) * 10000) / 100;
+}
+
 function changeClass(pct){
   if(pct === null || pct === undefined) return 'change-flat';
   if(pct < 0) return 'change-down';
@@ -303,10 +336,12 @@ function switchTab(tab){
 function renderLogPanel(){
   const panel = document.getElementById('panel-log');
   const sorted = [...ENTRIES].sort((a,b)=> b.date.localeCompare(a.date));
+  const streak = computeStreak(ENTRIES.map(e => e.date).sort());
+  const streakLine = (streak.active && streak.count > 1) ? `<div class="streak-line">🔥 连续打卡 ${streak.count} 天</div>` : '';
   panel.innerHTML = `
     <div class="whoami">
       <div class="av">${PROFILE.avatar}</div>
-      <div class="name">${escapeHtml(PROFILE.name)}</div>
+      <div class="name">${escapeHtml(PROFILE.name)}${streakLine}</div>
       <button class="edit-link" id="edit-profile-btn">编辑资料</button>
     </div>
     <div class="privacy-note">🔒 这里的体重数字只有你自己能看到（数据库权限规则强制限定）。同步到团队墙的，只有当天的增减百分比。</div>
@@ -492,12 +527,52 @@ async function renderWallPanel(){
     return;
   }
 
-  const latestByUser = new Map();
+  const byUser = new Map();
   for(const row of data){
-    if(!latestByUser.has(row.user_id)) latestByUser.set(row.user_id, row);
+    if(!byUser.has(row.user_id)) byUser.set(row.user_id, []);
+    byUser.get(row.user_id).push(row);
   }
-  const rows = [...latestByUser.values()].sort((a,b)=> b.entry_date.localeCompare(a.entry_date));
+  for(const arr of byUser.values()) arr.sort((a,b)=> a.entry_date.localeCompare(b.entry_date));
+
+  const members = [...byUser.values()].map(arr => {
+    const latest = arr[arr.length - 1];
+    const streak = computeStreak(arr.map(r => r.entry_date));
+
+    // weekly change: compare the latest baseline-% to whichever entry sits
+    // at least 7 days before it (falling back to their very first entry if
+    // they haven't been in the team a week yet).
+    let weeklyChangePercent = null;
+    const hasLatestBaseline = latest.change_from_baseline_percent !== null && latest.change_from_baseline_percent !== undefined;
+    if(hasLatestBaseline){
+      let ref = null;
+      for(let i = arr.length - 1; i >= 0; i--){
+        if(daysBetween(arr[i].entry_date, latest.entry_date) >= 7){ ref = arr[i]; break; }
+      }
+      if(!ref) ref = arr[0];
+      const hasRefBaseline = ref.change_from_baseline_percent !== null && ref.change_from_baseline_percent !== undefined;
+      if(hasRefBaseline && ref.entry_date !== latest.entry_date){
+        weeklyChangePercent = pctBetweenBaselinePoints(Number(ref.change_from_baseline_percent), Number(latest.change_from_baseline_percent));
+      }
+    }
+
+    return { ...latest, streak, weeklyChangePercent };
+  });
+
+  const rows = members.sort((a,b)=> b.entry_date.localeCompare(a.entry_date));
   const totalDown = rows.filter(r => r.change_from_baseline_percent !== null && Number(r.change_from_baseline_percent) < 0).length;
+
+  // today's champion: whoever logged today with the biggest day-over-day drop
+  const today = todayStr();
+  const todaysDrops = rows.filter(r => r.entry_date === today && r.change_percent !== null && Number(r.change_percent) < 0);
+  const champion = todaysDrops.length
+    ? todaysDrops.reduce((best, r) => Number(r.change_percent) < Number(best.change_percent) ? r : best)
+    : null;
+
+  // weekly star: biggest actual weekly loss, if anyone has one
+  const weeklyCandidates = rows.filter(r => r.weeklyChangePercent !== null && r.weeklyChangePercent < 0);
+  const weeklyStar = weeklyCandidates.length
+    ? weeklyCandidates.reduce((best, r) => r.weeklyChangePercent < best.weeklyChangePercent ? r : best)
+    : null;
 
   panel.innerHTML = `
     <div class="wall-head">
@@ -505,6 +580,18 @@ async function renderWallPanel(){
       <div class="big-stat-label">位队友已经比自己的起始体重更轻</div>
     </div>
     <div class="privacy-note">👀 团队墙只显示增减百分比，不会显示任何人的具体体重。</div>
+    ${weeklyStar ? `
+    <div class="weekly-star-card">
+      <div class="weekly-star-label">🏅 本周之星</div>
+      <div class="weekly-star-body">
+        <div class="wall-av weekly-star-av">${weeklyStar.avatar}</div>
+        <div class="weekly-star-info">
+          <div class="weekly-star-name">${escapeHtml(weeklyStar.name)}</div>
+          <div class="weekly-star-sub">过去 7 天进步最大</div>
+        </div>
+        <div class="weekly-star-pct">${changeLabel(weeklyStar.weeklyChangePercent)}</div>
+      </div>
+    </div>` : ''}
     <div id="wall-list"></div>
   `;
   const list = document.getElementById('wall-list');
@@ -519,13 +606,15 @@ async function renderWallPanel(){
     const hasBaseline = m.change_from_baseline_percent !== null && m.change_from_baseline_percent !== undefined;
     const baselinePct = hasBaseline ? Number(m.change_from_baseline_percent) : null;
     const latestPct = m.change_percent === null ? null : Number(m.change_percent);
+    const isChampion = champion && m.user_id === champion.user_id;
+    const streakBadge = (m.streak.active && m.streak.count > 1) ? ` · 🔥 连续${m.streak.count}天` : '';
     const row = document.createElement('div');
-    row.className = 'wall-row';
+    row.className = 'wall-row' + (isChampion ? ' wall-row-champion' : '');
     row.innerHTML = `
       <div class="wall-av">${m.avatar}</div>
       <div class="wall-info">
-        <div class="wall-name">${escapeHtml(m.name)}</div>
-        <div class="wall-date">${fmtDate(m.entry_date)} 更新</div>
+        <div class="wall-name">${escapeHtml(m.name)}${isChampion ? ' <span class="champion-badge">👑 今日之星</span>' : ''}</div>
+        <div class="wall-date">${fmtDate(m.entry_date)} 更新${streakBadge}</div>
       </div>
       <div class="wall-changes">
         <div class="wall-change ${hasBaseline ? changeClass(baselinePct) : 'change-flat'}">${hasBaseline ? changeLabel(baselinePct) : '待同步'}</div>
