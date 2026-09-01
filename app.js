@@ -90,6 +90,7 @@ async function afterLogin(){
     PROFILE = data;
   }
   await loadEntries();
+  await backfillBaselineIfNeeded();
   renderApp();
 }
 
@@ -105,6 +106,29 @@ async function loadEntries(){
     changePercent: r.change_percent === null ? null : Number(r.change_percent),
     baselinePercent: r.change_from_baseline_percent === null ? null : Number(r.change_from_baseline_percent)
   }));
+}
+
+// entries saved before the "vs. starting weight" feature existed have
+// change_from_baseline_percent = NULL in the database (adding a column
+// doesn't retroactively fill old rows). Recompute and resync those quietly
+// on load so the person never has to think about it.
+async function backfillBaselineIfNeeded(){
+  if(ENTRIES.length === 0) return;
+  const needsBackfill = ENTRIES.some(e => e.baselinePercent === null);
+  if(!needsBackfill) return;
+  const sortedAsc = [...ENTRIES].sort((a,b)=> a.date.localeCompare(b.date));
+  const recomputed = recomputeChanges(sortedAsc);
+  const rows = recomputed.map(e => ({
+    user_id: SESSION.user.id,
+    entry_date: e.date,
+    weight: e.weight,
+    change_percent: e.changePercent,
+    change_from_baseline_percent: e.baselinePercent
+  }));
+  const { error } = await supabase.from('weight_entries').upsert(rows, { onConflict: 'user_id,entry_date' });
+  if(!error){
+    ENTRIES = recomputed;
+  }
 }
 
 // ---------------- auth screen ----------------
@@ -473,7 +497,7 @@ async function renderWallPanel(){
     if(!latestByUser.has(row.user_id)) latestByUser.set(row.user_id, row);
   }
   const rows = [...latestByUser.values()].sort((a,b)=> b.entry_date.localeCompare(a.entry_date));
-  const totalDown = rows.filter(r => Number(r.change_from_baseline_percent) < 0).length;
+  const totalDown = rows.filter(r => r.change_from_baseline_percent !== null && Number(r.change_from_baseline_percent) < 0).length;
 
   panel.innerHTML = `
     <div class="wall-head">
@@ -489,7 +513,11 @@ async function renderWallPanel(){
     return;
   }
   rows.forEach(m=>{
-    const baselinePct = Number(m.change_from_baseline_percent);
+    // change_from_baseline_percent can briefly be NULL for rows saved before
+    // this feature existed, until the owner's client backfills it — never
+    // treat that as a real 0% change.
+    const hasBaseline = m.change_from_baseline_percent !== null && m.change_from_baseline_percent !== undefined;
+    const baselinePct = hasBaseline ? Number(m.change_from_baseline_percent) : null;
     const latestPct = m.change_percent === null ? null : Number(m.change_percent);
     const row = document.createElement('div');
     row.className = 'wall-row';
@@ -500,7 +528,7 @@ async function renderWallPanel(){
         <div class="wall-date">${fmtDate(m.entry_date)} 更新</div>
       </div>
       <div class="wall-changes">
-        <div class="wall-change ${changeClass(baselinePct)}">${changeLabel(baselinePct)}</div>
+        <div class="wall-change ${hasBaseline ? changeClass(baselinePct) : 'change-flat'}">${hasBaseline ? changeLabel(baselinePct) : '待同步'}</div>
         <div class="wall-change-sub">较起始体重${latestPct===null ? '' : ` · 最新 ${changeLabel(latestPct)}`}</div>
       </div>
     `;
