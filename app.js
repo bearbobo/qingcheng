@@ -338,10 +338,11 @@ function renderLogPanel(){
   const sorted = [...ENTRIES].sort((a,b)=> b.date.localeCompare(a.date));
   const streak = computeStreak(ENTRIES.map(e => e.date).sort());
   const streakLine = (streak.active && streak.count > 1) ? `<div class="streak-line">🔥 连续打卡 ${streak.count} 天</div>` : '';
+  const hiddenLine = (PROFILE.visible_on_wall === false) ? `<div class="hidden-line">🙈 已从团队墙隐藏</div>` : '';
   panel.innerHTML = `
     <div class="whoami">
       <div class="av">${PROFILE.avatar}</div>
-      <div class="name">${escapeHtml(PROFILE.name)}${streakLine}</div>
+      <div class="name">${escapeHtml(PROFILE.name)}${streakLine}${hiddenLine}</div>
       <button class="edit-link" id="edit-profile-btn">编辑资料</button>
     </div>
     <div class="privacy-note">🔒 这里的体重数字只有你自己能看到（数据库权限规则强制限定）。同步到团队墙的，只有当天的增减百分比。</div>
@@ -467,6 +468,7 @@ async function deleteEntry(date){
 // ---------------- edit profile modal ----------------
 function openEditProfile(){
   pendingAvatar = PROFILE.avatar;
+  let pendingVisible = PROFILE.visible_on_wall !== false;
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
@@ -476,6 +478,13 @@ function openEditProfile(){
       <input id="edit-name" type="text" value="${escapeHtml(PROFILE.name)}" maxlength="20" style="margin-bottom:16px" />
       <label class="field-label">头像</label>
       <div class="avatar-grid" id="edit-avatars"></div>
+      <div class="visibility-toggle-row">
+        <div>
+          <div class="visibility-toggle-title">在团队墙上展示</div>
+          <div class="visibility-toggle-sub">关掉之后，你会从团队墙上消失。你自己的记录不受影响，随时可以再打开。</div>
+        </div>
+        <button type="button" class="toggle-switch" id="visibility-toggle" role="switch"></button>
+      </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="edit-cancel">取消</button>
         <button class="btn btn-primary" id="edit-save">保存</button>
@@ -496,16 +505,21 @@ function openEditProfile(){
     };
     grid.appendChild(b);
   });
+  const toggleBtn = document.getElementById('visibility-toggle');
+  const syncToggleUI = ()=> toggleBtn.classList.toggle('on', pendingVisible);
+  syncToggleUI();
+  toggleBtn.onclick = ()=>{ pendingVisible = !pendingVisible; syncToggleUI(); };
+
   document.getElementById('edit-cancel').onclick = ()=> backdrop.remove();
   document.getElementById('edit-save').onclick = async ()=>{
     const newName = document.getElementById('edit-name').value.trim();
     if(!newName){ showToast('昵称不能为空'); return; }
     const { error } = await supabase
       .from('profiles')
-      .update({ name: newName, avatar: pendingAvatar })
+      .update({ name: newName, avatar: pendingAvatar, visible_on_wall: pendingVisible })
       .eq('id', SESSION.user.id);
     if(error){ showToast('更新失败，请重试'); return; }
-    PROFILE = { ...PROFILE, name: newName, avatar: pendingAvatar };
+    PROFILE = { ...PROFILE, name: newName, avatar: pendingAvatar, visible_on_wall: pendingVisible };
     backdrop.remove();
     renderLogPanel();
     showToast('资料已更新');
