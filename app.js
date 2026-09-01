@@ -69,7 +69,7 @@ function computeStreak(datesAsc){
 function pctBetweenBaselinePoints(baselinePctAtRef, baselinePctAtLatest){
   const denom = 1 + (baselinePctAtRef / 100);
   if(denom <= 0) return null;
-  return Math.round(((baselinePctAtLatest - baselinePctAtRef) / denom) * 10000) / 100;
+  return Math.round(((baselinePctAtLatest - baselinePctAtRef) / denom) * 100) / 100;
 }
 
 function changeClass(pct){
